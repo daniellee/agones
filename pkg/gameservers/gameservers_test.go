@@ -47,43 +47,73 @@ func TestAddress(t *testing.T) {
 	t.Parallel()
 
 	fixture := map[string]struct {
-		node            *corev1.Node
-		expectedAddress string
-		featureFlags    string
+		node                 *corev1.Node
+		pod                  *corev1.Pod
+		expectedAddress      string
+		expectedPodAddresses []corev1.NodeAddress
+		featureFlags         string
 	}{
 		"node with external ip": {
-			node:            &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeFixtureName}, Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Address: "12.12.12.12", Type: corev1.NodeExternalIP}}}},
-			expectedAddress: "12.12.12.12",
+			node:                 &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeFixtureName}, Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Address: "12.12.12.12", Type: corev1.NodeExternalIP}}}},
+			pod:                  &corev1.Pod{},
+			expectedPodAddresses: []corev1.NodeAddress{},
+			expectedAddress:      "12.12.12.12",
 		},
 		"node with an internal ip": {
-			node:            &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeFixtureName}, Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Address: "11.11.11.11", Type: corev1.NodeInternalIP}}}},
-			expectedAddress: "11.11.11.11",
+			node:                 &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeFixtureName}, Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Address: "11.11.11.11", Type: corev1.NodeInternalIP}}}},
+			pod:                  &corev1.Pod{},
+			expectedPodAddresses: []corev1.NodeAddress{},
+			expectedAddress:      "11.11.11.11",
 		},
 		"node with internal and external ip": {
-			node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeFixtureName},
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: nodeFixtureName},
 				Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{
 					{Address: "9.9.9.8", Type: corev1.NodeExternalIP},
 					{Address: "12.12.12.12", Type: corev1.NodeInternalIP},
-				}}},
-			expectedAddress: "9.9.9.8",
+				}},
+			},
+			pod:                  &corev1.Pod{},
+			expectedPodAddresses: []corev1.NodeAddress{},
+			expectedAddress:      "9.9.9.8",
 		},
 		"node with external and internal dns": {
-			node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeFixtureName},
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: nodeFixtureName},
 				Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{
 					{Address: "external.example.com", Type: corev1.NodeExternalDNS},
 					{Address: "internal.example.com", Type: corev1.NodeInternalDNS},
-				}}},
-			expectedAddress: "external.example.com",
+				}},
+			},
+			pod:                  &corev1.Pod{},
+			expectedPodAddresses: []corev1.NodeAddress{},
+			expectedAddress:      "external.example.com",
 		},
 		"node with external and internal dns without feature flag": {
-			node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeFixtureName},
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: nodeFixtureName},
 				Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{
 					{Address: "external.example.com", Type: corev1.NodeExternalDNS},
 					{Address: "internal.example.com", Type: corev1.NodeInternalDNS},
 					{Address: "9.9.9.8", Type: corev1.NodeExternalIP},
 					{Address: "12.12.12.12", Type: corev1.NodeInternalIP},
-				}}},
-			expectedAddress: "external.example.com",
+				}},
+			},
+			pod:                  &corev1.Pod{},
+			expectedPodAddresses: []corev1.NodeAddress{},
+			expectedAddress:      "external.example.com",
+		},
+		"node with external IP and pod with external IPv6 IP": {
+			node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeFixtureName}, Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Address: "12.12.12.12", Type: corev1.NodeExternalIP}}}},
+			pod: &corev1.Pod{Status: corev1.PodStatus{PodIPs: []corev1.PodIP{
+				{IP: "2a0e:cc81:1000:102:1:a:0:1"},
+				{IP: "10.98.0.81"},
+			}}},
+			expectedPodAddresses: []corev1.NodeAddress{
+				{Type: "PodIP", Address: "2a0e:cc81:1000:102:1:a:0:1"},
+				{Type: "PodIP", Address: "10.98.0.81"},
+			},
+			expectedAddress: "12.12.12.12",
 		},
 	}
 
@@ -98,10 +128,11 @@ func TestAddress(t *testing.T) {
 			err := runtime.ParseFeatures(fixture.featureFlags)
 			assert.NoError(t, err)
 
-			addr, addrs, err := address(fixture.node)
+			addr, addrs, err := address(fixture.node, fixture.pod)
 			require.NoError(t, err)
 			assert.Equal(t, fixture.expectedAddress, addr)
-			assert.Equal(t, fixture.node.Status.Addresses, addrs)
+			assert.Subset(t, addrs, fixture.node.Status.Addresses)
+			assert.Subset(t, addrs, fixture.expectedPodAddresses)
 		})
 	}
 }
@@ -127,15 +158,27 @@ func TestApplyGameServerAddressAndPort(t *testing.T) {
 			},
 			wantHostPort: 9876,
 		},
+		"Pod IP changed after create": {
+			podMod: func(pod *corev1.Pod) {
+				pod.Status.PodIPs = []corev1.PodIP{
+					{IP: ipFixture},
+				}
+			},
+			podSyncer:    noopSyncer,
+			wantHostPort: 9999,
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			gsFixture := &agonesv1.GameServer{ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
-				Spec: newSingleContainerSpec(), Status: agonesv1.GameServerStatus{State: agonesv1.GameServerStateRequestReady}}
+			gsFixture := &agonesv1.GameServer{
+				ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+				Spec:       newSingleContainerSpec(), Status: agonesv1.GameServerStatus{State: agonesv1.GameServerStateRequestReady},
+			}
 			gsFixture.ApplyDefaults()
 			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeFixtureName}, Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Address: ipFixture, Type: corev1.NodeExternalIP}}}}
 			pod, err := gsFixture.Pod(agtesting.FakeAPIHooks{})
 			require.NoError(t, err)
 			pod.Spec.NodeName = node.ObjectMeta.Name
+			pod.Status.PodIPs = []corev1.PodIP{{IP: ipFixture}}
 			tc.podMod(pod)
 
 			gs, err := applyGameServerAddressAndPort(gsFixture, node, pod, tc.podSyncer)
@@ -144,14 +187,17 @@ func TestApplyGameServerAddressAndPort(t *testing.T) {
 				assert.Equal(t, tc.wantHostPort, gs.Status.Ports[0].Port)
 				assert.Equal(t, gs.Spec.Ports[0].HostPort, gs.Status.Ports[0].Port)
 			}
+			assert.Subset(t, gs.Status.Addresses, []corev1.NodeAddress{{Address: ipFixture, Type: NodePodIP}})
 			assert.Equal(t, ipFixture, gs.Status.Address)
 			assert.Equal(t, node.ObjectMeta.Name, gs.Status.NodeName)
 		})
 	}
 
 	t.Run("No IP specified, err expected", func(t *testing.T) {
-		gsFixture := &agonesv1.GameServer{ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
-			Spec: newSingleContainerSpec(), Status: agonesv1.GameServerStatus{State: agonesv1.GameServerStateRequestReady}}
+		gsFixture := &agonesv1.GameServer{
+			ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+			Spec:       newSingleContainerSpec(), Status: agonesv1.GameServerStatus{State: agonesv1.GameServerStateRequestReady},
+		}
 		gsFixture.ApplyDefaults()
 		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeFixtureName}, Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{}}}
 		pod, err := gsFixture.Pod(agtesting.FakeAPIHooks{})

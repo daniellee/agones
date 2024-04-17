@@ -24,6 +24,11 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 )
 
+const (
+	// NodePodIP is the type for an IP address from a pod.
+	NodePodIP corev1.NodeAddressType = "PodIP"
+)
+
 // isGameServerPod returns if this Pod is a Pod that comes from a GameServer
 func isGameServerPod(pod *corev1.Pod) bool {
 	if agonesv1.GameServerRolePodSelector.Matches(labels.Set(pod.ObjectMeta.Labels)) {
@@ -42,10 +47,16 @@ func isGameServerPod(pod *corev1.Pod) bool {
 // If externalDNS is false, skip ExternalDNS and InternalDNS.
 // since we can have clusters that are private, and/or tools like minikube
 // that only report an InternalIP.
-func address(node *corev1.Node) (string, []corev1.NodeAddress, error) {
+func address(node *corev1.Node, pod *corev1.Pod) (string, []corev1.NodeAddress, error) {
 	addresses := make([]corev1.NodeAddress, 0, len(node.Status.Addresses))
 	for _, a := range node.Status.Addresses {
 		addresses = append(addresses, *a.DeepCopy())
+	}
+
+	if pod.Status.PodIPs != nil {
+		for _, a := range pod.Status.PodIPs {
+			addresses = append(addresses, corev1.NodeAddress{Type: NodePodIP, Address: a.IP})
+		}
 	}
 
 	for _, a := range addresses {
@@ -73,13 +84,19 @@ func address(node *corev1.Node) (string, []corev1.NodeAddress, error) {
 		}
 	}
 
+	for _, a := range addresses {
+		if a.Type == NodePodIP && net.ParseIP(a.Address) != nil {
+			return a.Address, addresses, nil
+		}
+	}
+
 	return "", nil, errors.Errorf("Could not find an address for Node: %s", node.ObjectMeta.Name)
 }
 
 // applyGameServerAddressAndPort gathers the address and port details from the node and pod
 // and applies them to the GameServer that is passed in, and returns it.
 func applyGameServerAddressAndPort(gs *agonesv1.GameServer, node *corev1.Node, pod *corev1.Pod, syncPodPortsToGameServer func(*agonesv1.GameServer, *corev1.Pod) error) (*agonesv1.GameServer, error) {
-	addr, addrs, err := address(node)
+	addr, addrs, err := address(node, pod)
 	if err != nil {
 		return gs, errors.Wrapf(err, "error getting external address for GameServer %s", gs.ObjectMeta.Name)
 	}
