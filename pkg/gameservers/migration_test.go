@@ -69,8 +69,10 @@ func TestMigrationControllerIsRunningGameServer(t *testing.T) {
 
 	for k, v := range fixtures {
 		t.Run(k, func(t *testing.T) {
-			gs := &agonesv1.GameServer{ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
-				Spec: newSingleContainerSpec()}
+			gs := &agonesv1.GameServer{
+				ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+				Spec:       newSingleContainerSpec(),
+			}
 			gs.ApplyDefaults()
 
 			gsPod, err := gs.Pod(agtesting.FakeAPIHooks{})
@@ -195,16 +197,20 @@ func TestMigrationControllerSyncGameServer(t *testing.T) {
 			c := NewMigrationController(healthcheck.NewHandler(), m.KubeClient, m.AgonesClient, m.KubeInformerFactory, m.AgonesInformerFactory, nilSyncPodPortsToGameServer)
 			c.recorder = m.FakeRecorder
 
-			gs := &agonesv1.GameServer{ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
-				Spec: newSingleContainerSpec(), Status: agonesv1.GameServerStatus{}}
+			gs := &agonesv1.GameServer{
+				ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+				Spec:       newSingleContainerSpec(), Status: agonesv1.GameServerStatus{},
+			}
 			gs.ApplyDefaults()
 
 			pod, err := gs.Pod(agtesting.FakeAPIHooks{})
 			require.NoError(t, err)
 			pod.Spec.NodeName = nodeFixtureName
 
-			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeFixtureName},
-				Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Address: ipFixture, Type: corev1.NodeExternalIP}}}}
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: nodeFixtureName},
+				Status:     corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Address: ipFixture, Type: corev1.NodeExternalIP}}},
+			}
 
 			gs, pod, node = v.setup(gs, pod, node)
 
@@ -244,8 +250,10 @@ func TestMigrationControllerSyncGameServer(t *testing.T) {
 func TestMigrationControllerRun(t *testing.T) {
 	m := agtesting.NewMocks()
 	c := NewMigrationController(healthcheck.NewHandler(), m.KubeClient, m.AgonesClient, m.KubeInformerFactory, m.AgonesInformerFactory, nilSyncPodPortsToGameServer)
-	gs := &agonesv1.GameServer{ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
-		Spec: newSingleContainerSpec(), Status: agonesv1.GameServerStatus{}}
+	gs := &agonesv1.GameServer{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+		Spec:       newSingleContainerSpec(), Status: agonesv1.GameServerStatus{},
+	}
 	gs.ApplyDefaults()
 	gsPod, err := gs.Pod(agtesting.FakeAPIHooks{})
 	require.NoError(t, err)
@@ -386,14 +394,18 @@ func TestMigrationControllerAnyAddressMatch(t *testing.T) {
 		t.Run(k, func(t *testing.T) {
 			m := agtesting.NewMocks()
 			c := NewMigrationController(healthcheck.NewHandler(), m.KubeClient, m.AgonesClient, m.KubeInformerFactory, m.AgonesInformerFactory, nilSyncPodPortsToGameServer)
-			gs := &agonesv1.GameServer{ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
-				Spec: newSingleContainerSpec(), Status: agonesv1.GameServerStatus{
+			gs := &agonesv1.GameServer{
+				ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+				Spec:       newSingleContainerSpec(), Status: agonesv1.GameServerStatus{
 					Address: v.gsAddress,
-				}}
-			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeFixtureName},
-				Status: corev1.NodeStatus{Addresses: v.nodeAddresses}}
+				},
+			}
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: nodeFixtureName},
+				Status:     corev1.NodeStatus{Addresses: v.nodeAddresses},
+			}
 
-			matches := c.anyAddressMatch(node, gs)
+			matches := c.anyAddressMatch(node, gs, &corev1.Pod{Status: corev1.PodStatus{PodIPs: []corev1.PodIP{}}})
 			assert.Equal(t, v.matches, matches)
 		})
 	}

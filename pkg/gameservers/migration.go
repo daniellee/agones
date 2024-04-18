@@ -68,7 +68,6 @@ func NewMigrationController(health healthcheck.Handler,
 	agonesInformerFactory externalversions.SharedInformerFactory,
 	syncPodPortsToGameServer func(*agonesv1.GameServer, *corev1.Pod) error,
 ) *MigrationController {
-
 	podInformer := kubeInformerFactory.Core().V1().Pods().Informer()
 	gameserverInformer := agonesInformerFactory.Agones().V1().GameServers()
 	mc := &MigrationController{
@@ -182,7 +181,7 @@ func (mc *MigrationController) syncGameServer(ctx context.Context, key string) e
 		return errors.Wrapf(err, "error retrieving node %s for Pod %s", pod.Spec.NodeName, pod.ObjectMeta.Name)
 	}
 
-	if pod.Spec.NodeName != gs.Status.NodeName || !mc.anyAddressMatch(node, gs) {
+	if pod.Spec.NodeName != gs.Status.NodeName || !mc.anyAddressMatch(node, gs, pod) {
 		gsCopy := gs.DeepCopy()
 
 		var eventMsg string
@@ -210,7 +209,7 @@ func (mc *MigrationController) syncGameServer(ctx context.Context, key string) e
 	return nil
 }
 
-func (mc *MigrationController) anyAddressMatch(node *k8sv1.Node, gs *agonesv1.GameServer) bool {
+func (mc *MigrationController) anyAddressMatch(node *k8sv1.Node, gs *agonesv1.GameServer, pod *k8sv1.Pod) bool {
 	nodeAddresses := []string{}
 	for _, a := range node.Status.Addresses {
 		if a.Address == gs.Status.Address {
@@ -218,6 +217,14 @@ func (mc *MigrationController) anyAddressMatch(node *k8sv1.Node, gs *agonesv1.Ga
 		}
 		nodeAddresses = append(nodeAddresses, a.Address)
 	}
+
+	for _, a := range pod.Status.PodIPs {
+		if a.IP == gs.Status.Address {
+			return true
+		}
+		nodeAddresses = append(nodeAddresses, a.IP)
+	}
+
 	mc.loggerForGameServer(gs).
 		WithField("gs", gs.Name).
 		WithField("gs.Status.Address", gs.Status.Address).
