@@ -138,7 +138,8 @@ type SDKServer struct {
 // NewSDKServer creates a SDKServer that sets up an
 // InClusterConfig for Kubernetes
 func NewSDKServer(gameServerName, namespace string, kubeClient kubernetes.Interface,
-	agonesClient versioned.Interface, logLevel logrus.Level) (*SDKServer, error) {
+	agonesClient versioned.Interface, logLevel logrus.Level,
+) (*SDKServer, error) {
 	mux := http.NewServeMux()
 	resync := 30 * time.Second
 	if runtime.FeatureEnabled(runtime.FeatureDisableResyncOnSDKServer) {
@@ -456,6 +457,11 @@ func (s *SDKServer) patchGameServer(ctx context.Context, gs, gsCopy *agonesv1.Ga
 	if err != nil {
 		return nil, err
 	}
+	s.logger.
+		WithField("gameserver namespace", s.namespace).
+		WithField("gameserver name", gs.GetObjectMeta().GetName()).
+		WithField("patch", patch).
+		Info("Patching GameServer")
 
 	return s.gameServerGetter.GameServers(s.namespace).Patch(ctx, gs.GetObjectMeta().GetName(), types.JSONPatchType, patch, metav1.PatchOptions{})
 }
